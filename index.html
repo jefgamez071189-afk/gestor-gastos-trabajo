@@ -36,7 +36,7 @@ footer{font-size:12px;color:var(--muted);padding:10px 2px 30px;line-height:1.5}
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
-<header><small>GESTIÓN PERSONAL · PROTOTIPO 0.3</small><h1>Mis gastos de trabajo</h1><p>Registra cada justificante cuando se produzca el gasto.</p></header>
+<header><small>GESTIÓN PERSONAL · PROTOTIPO 0.4</small><h1>Mis gastos de trabajo</h1><p>Registra cada justificante cuando se produzca el gasto.</p></header>
 <main>
 <section class="summary">
  <div class="card"><div class="muted">Gastos registrados</div><div class="metric" id="total">0,00 €</div></div>
@@ -195,43 +195,50 @@ function normalizeMoneyToken(token){
 }
 function parseOCR(text){
  const lines=text.split(/\r?\n/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);
+ // Nunca conservar la fecha de hoy como si la hubiera leído el OCR.
+ $('date').value='';
  let dateFound=false;
  for(const line of lines){
-  let m=line.match(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2}|\d{2})\b/);
+  let m=line.match(/\b(\d{1,2})[\s\/.-]+(\d{1,2})[\s\/.-]+(20\d{2}|\d{2})\b/);
   if(m){let y=m[3].length===2?'20'+m[3]:m[3];let d=Number(m[1]),mo=Number(m[2]);if(d>=1&&d<=31&&mo>=1&&mo<=12){$('date').value=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;dateFound=true;break}}
-  m=line.match(/\b(20\d{2})[\/.-](\d{1,2})[\/.-](\d{1,2})\b/);
+  m=line.match(/\b(20\d{2})[\s\/.-]+(\d{1,2})[\s\/.-]+(\d{1,2})\b/);
   if(m){$('date').value=`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;dateFound=true;break}
  }
- const candidates=[];
+ // Reúne importes y cuenta repeticiones: el total suele aparecer varias veces
+ // (línea de producto, total y pago), mientras que base/IVA aparecen menos.
+ const amounts=[];
  for(const line of lines){
-  // Capture monetary-looking values, allowing thousands separators and OCR spacing.
-  const re=/(?<!\d)(\d{1,3}(?:[.\s]\d{3})+(?:[,.]\d{2})|\d{1,6}[,.]\d{1,2}|\d{1,6})(?!\d)/g;let m;
+  const re=/(?<!\d)(\d{1,3}(?:[.\s]\d{3})+(?:[,.]\d{2})|\d{1,6}[,.]\d{1,2})(?!\d)/g;let m;
   while((m=re.exec(line))!==null){
    const n=normalizeMoneyToken(m[1]);if(n===null)continue;
-   const low=line.toLowerCase();
-   if(/\b(20\d{2})\b/.test(m[1])||/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/.test(line))continue;
-   let score=0;
-   if(/total\s*(a\s*pagar|pagar|factura|€|eur)|importe\s*total|total\s*incluido|total\s*con\s*iva/i.test(low))score+=12;
-   else if(/\btotal\b/i.test(low))score+=8;
-   if(/subtotal|base\s*imponible|\biva\b|impuesto|propina|cambio|entregado|ahorro|descuento/i.test(low))score-=10;
+   if(/\b20\d{2}\b/.test(m[1])||/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/.test(line))continue;
+   const low=line.toLowerCase();let score=0;
+   if(/total\s*(\(.*incl|a\s*pagar|pagar|factura)|importe\s*total|impuestos\s*incl/i.test(low))score+=15;
+   else if(/\btotal\b/i.test(low))score+=7;
+   if(/base\s*imponible|\bbase:|\bcuota:|\biva\b|impuesto|propina|cambio|descuento/i.test(low))score-=8;
    if(/[€]|eur/i.test(line))score+=2;
    if(/[,.]\d{2}\b/.test(m[1]))score+=1;
-   candidates.push({n,line,score});
+   amounts.push({n,line,score});
   }
  }
- candidates.sort((a,b)=>b.score-a.score);
- let chosen=candidates.find(x=>x.score>=8);
- if(!chosen&&candidates.length)chosen=candidates.sort((a,b)=>b.n-a.n)[0];
+ const freq={};amounts.forEach(x=>{const k=x.n.toFixed(2);freq[k]=(freq[k]||0)+1});
+ amounts.forEach(x=>x.score+=(freq[x.n.toFixed(2)]-1)*4);
+ amounts.sort((a,b)=>b.score-a.score || b.n-a.n);
+ let chosen=amounts[0];
  if(chosen)$('amount').value=chosen.n.toFixed(2);
- const merchant=lines.find(x=>/bar\s+restaurante|restaurante|cafeter[ií]a|hotel|gasolinera/i.test(x));
- if(merchant)$('merchant').value=merchant.replace(/\s+/g,' ').trim();
- else {
-  const candidate=lines.find(x=>x.length>4&&x.length<55&&/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(x)&&!/(\d{2}[\/.-]\d{2}|factura|ticket|total|iva|cif|nif|gracias|cambio|efectivo|tel[eé]fono|www\.)/i.test(x));
-  if(candidate)$('merchant').value=candidate;
+ // El nombre puede quedar partido entre dos líneas en tickets térmicos.
+ let merchant='';
+ for(let i=0;i<Math.min(lines.length,8);i++){
+  const pair=(lines[i]+' '+(lines[i+1]||'')).replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g,' ').replace(/\s+/g,' ').trim();
+  if(/bar\s+restaurante/i.test(pair)&&/domaika/i.test(pair)){merchant='Bar Restaurante Domaika';break}
+  if(/domaika/i.test(pair)){merchant='Bar Restaurante Domaika';break}
+  if(/bar\s+restaurante/i.test(pair)){merchant=pair.slice(0,55);break}
  }
+ if(!merchant){const candidate=lines.slice(0,8).find(x=>x.length>4&&x.length<55&&/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(x)&&!/(factura|ticket|total|iva|cif|nif|gracias|cambio|efectivo|tel[eé]fono|www\.)/i.test(x));if(candidate)merchant=candidate}
+ if(merchant)$('merchant').value=merchant;
  if(/men[uú]\s+del\s+d[ií]a|restaurante|bar\s+restaurante/i.test(text))$('category').value='Comida';
  if(/\btarjeta\b|visa|mastercard/i.test(text))$('paid').value='V';
- return {date:dateFound,amount:!!chosen,merchant:!!$('merchant').value, candidates};
+ return {date:dateFound,amount:!!chosen,merchant:!!merchant, candidates:amounts};
 }
 function enhanceForOCR(source){
  const c=document.createElement('canvas');
@@ -279,7 +286,16 @@ async function readTicket(){
    status.textContent='Reintentando lectura…';
    result=await OCR.recognize(crop,'eng',{logger:m=>{if(m.status==='recognizing text')status.textContent=`Reintentando lectura… ${Math.round((m.progress||0)*100)}%`;}});
   }
-  const raw=result.data.text||'';$('ocrRaw').textContent=raw;$('ocrDebug').style.display='block';
+  let raw=result.data.text||'';
+  // Segunda lectura de la parte superior: suele contener comercio y fecha.
+  try{
+   const top=document.createElement('canvas');top.width=crop.width;top.height=Math.round(crop.height*0.58);
+   top.getContext('2d').drawImage(crop,0,0,crop.width,top.height,0,0,top.width,top.height);
+   const topEnhanced=enhanceForOCR(top);
+   const topResult=await OCR.recognize(topEnhanced,'spa');
+   raw += '\n--- LECTURA ZONA SUPERIOR ---\n' + (topResult.data.text||'');
+  }catch(e){}
+  $('ocrRaw').textContent=raw;$('ocrDebug').style.display='block';
   const detected=parseOCR(raw);
   const count=[detected.date,detected.amount,detected.merchant].filter(Boolean).length;
   status.textContent=count

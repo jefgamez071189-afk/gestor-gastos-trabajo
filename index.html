@@ -36,7 +36,7 @@ footer{font-size:12px;color:var(--muted);padding:10px 2px 30px;line-height:1.5}
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
-<header><small>GESTIÓN PERSONAL · PROTOTIPO 0.7</small><h1>Mis gastos de trabajo</h1><p>Registra cada justificante cuando se produzca el gasto.</p></header>
+<header><small>GESTIÓN PERSONAL · PRUEBA 0.8</small><h1>Mis gastos de trabajo</h1><p>Registra cada justificante cuando se produzca el gasto.</p></header>
 <main>
 <section class="summary">
  <div class="card"><div class="muted">Gastos registrados</div><div class="metric" id="total">0,00 €</div></div>
@@ -46,7 +46,9 @@ footer{font-size:12px;color:var(--muted);padding:10px 2px 30px;line-height:1.5}
  <h2>＋ Añadir gasto</h2>
  <form id="expenseForm">
   <label>Foto del ticket o factura</label>
-  <input id="photo" type="file" accept="image/*">
+  <div class="actions"><button type="button" class="secondary" onclick="document.getElementById('photoLibrary').click()">Fototeca</button><button type="button" class="secondary" onclick="document.getElementById('photoCamera').click()">Cámara</button><button type="button" class="secondary" onclick="document.getElementById('photoFiles').click()">Archivos</button></div>
+  <input id="photo" type="file" accept="image/*" hidden><input id="photoLibrary" type="file" accept="image/*" hidden><input id="photoCamera" type="file" accept="image/*" capture="environment" hidden><input id="photoFiles" type="file" accept="image/*,.pdf" hidden>
+  <div class="actions" style="margin-top:8px"><button type="button" id="removePhoto" class="danger secondary">Quitar foto</button></div>
   <p class="hint">Puedes hacer una foto, elegir una imagen de Fotos o buscar el justificante en Archivos.</p>
   <button type="button" id="readTicket" class="secondary" style="width:100%;margin-top:8px">Leer ticket y rellenar datos</button>
   <div class="muted">Al seleccionar la foto, intentaremos leerla automáticamente. Revisa siempre los datos detectados antes de guardar.</div>
@@ -66,44 +68,53 @@ footer{font-size:12px;color:var(--muted);padding:10px 2px 30px;line-height:1.5}
    <div><label>Descripción / motivo</label><input id="description" placeholder="Cliente, visita, formación…"></div>
   </div>
   <label>Comercio (opcional)</label><input id="merchant" placeholder="Nombre del establecimiento">
-  <div class="actions" style="margin-top:14px"><button type="submit">Guardar gasto</button><button type="reset" class="secondary">Limpiar</button></div>
+  <div class="actions" style="margin-top:14px"><button type="submit">Guardar ticket</button><button type="reset" class="secondary">Limpiar campos</button></div>
  </form>
 </section>
 <section class="card no-print">
  <h2>Notas de gastos</h2><div class="muted">Se crea una nota cuando registres al menos un gasto en una semana. La numeración continúa desde el 22 en 2026 y vuelve a 1 en 2027.</div>
- <div id="notes"></div>
- <div class="actions"><button id="exportCsv" class="secondary">Exportar gastos (CSV)</button><button id="exportPdf">Preparar PDF</button></div>
+ <div id="notes"></div><p class="muted" id="noteControl"></p><div class="actions"><button type="button" id="closeNote" class="danger">Cerrar nota abierta</button></div>
+ <div class="actions"><button id="exportCsv" class="secondary">Exportar gastos (CSV)</button><button id="exportJson" class="secondary">Copia de seguridad</button><button id="importJson" class="secondary">Restaurar copia</button><button id="exportPdf">Preparar PDF</button><input id="backupFile" type="file" accept="application/json" hidden></div>
 </section>
 <section id="preview">
  <h1>Justificantes de gastos</h1><p id="printInfo"></p><div id="printRows"></div>
 </section>
 <footer class="no-print">
-<strong>Importante — prototipo inicial:</strong> los datos y fotos se guardan localmente en este navegador/dispositivo. No borres los datos del navegador ni cambies de dispositivo sin exportar una copia. Los datos se guardan en este navegador/dispositivo. Exporta copias de seguridad periódicamente. La integración con la plantilla oficial Nota de Gastos 2026.xlsx queda pendiente.
+<strong>Versión de prueba:</strong> los datos se guardan en este navegador/dispositivo. Exporta copias de seguridad periódicamente. La integración directa con Google Drive y la escritura segura en el Excel oficial se activarán en una fase posterior; esta versión no modifica tu Excel ni lo sustituye.
 </footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 const KEY='gastosTrabajoPrototype01';
+const NOTES_KEY='gastosTrabajoNotes02';
+let noteMeta={};try{noteMeta=JSON.parse(localStorage.getItem(NOTES_KEY)||'{}')}catch(e){}
+let nextNumber=22;try{nextNumber=Number(localStorage.getItem('gastosTrabajoNextNumber')||22)}catch(e){}
 let expenses=[];try{expenses=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){}
 const money=n=>Number(n||0).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function save(){localStorage.setItem(KEY,JSON.stringify(expenses));render()}
+function save(){localStorage.setItem(KEY,JSON.stringify(expenses));localStorage.setItem(NOTES_KEY,JSON.stringify(noteMeta));localStorage.setItem('gastosTrabajoNextNumber',String(nextNumber));render()}
+function activeNote(){return Object.values(noteMeta).find(n=>!n.closed)||null}
+function ensureActiveNote(date){let n=activeNote();if(n)return n;const key=weekKey(date),year=Number(key.slice(0,4));if(year>=2027&&nextNumber>=22)nextNumber=1;n={id:key+'-'+nextNumber,key,number:nextNumber,year,closed:false};noteMeta[n.id]=n;return n}
+function assignLegacy(){const legacy=expenses.filter(e=>!e.noteId);const keys=[...new Set(legacy.map(e=>weekKey(e.date)))].sort();keys.forEach((key,i)=>{const year=Number(key.slice(0,4));const num=year>=2027?i+1:22+i;const id=key+'-'+num;noteMeta[id]={id,key,number:num,year,closed:i<keys.length-1};legacy.filter(e=>weekKey(e.date)===key).forEach(e=>e.noteId=id);if(year>=2027)nextNumber=Math.max(nextNumber,i+2);else nextNumber=Math.max(nextNumber,22+keys.length)});}
+assignLegacy();
 function weekKey(date){const d=new Date(date+'T12:00:00');const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function notes(){const groups={};expenses.forEach(e=>{const k=weekKey(e.date);(groups[k]??=[]).push(e)});return Object.keys(groups).sort().map(k=>({key:k,items:groups[k]}))}
 function render(){
  $('total').textContent=money(expenses.reduce((s,e)=>s+Number(e.amount),0));
- const y=new Date().getFullYear();const used=notes().filter(n=>n.key.startsWith(y+'-')).length;
- $('next').textContent=y===2026?22+used:(y===2027?1+used:1+used);
- $('notes').innerHTML=notes().sort((a,b)=>b.key.localeCompare(a.key)).map(n=>{
-  const d=new Date(n.key+'T12:00:00');const year=d.getFullYear();
-  const index=notes().filter(x=>x.key.startsWith(year+'-')).findIndex(x=>x.key===n.key);
-  const num=(year===2026?22:1)+index;
-  return `<div class="note"><div class="notehead"><div><strong>Nota ${num} · ${year}</strong><div class="muted">Semana desde ${d.toLocaleDateString('es-ES')}</div></div><span class="tag">${n.items.length} gasto(s)</span></div><div style="margin-top:8px;font-weight:750">${money(n.items.reduce((s,e)=>s+Number(e.amount),0))}</div>${n.items.map(e=>`<div class="muted">${esc(e.date)} · ${esc(e.category)} · ${money(e.amount)} · ${esc(e.merchant)}</div>`).join('')}</div>`
- }).join('')||'<p class="muted">Todavía no hay gastos registrados.</p>';
+ const active=activeNote();$('next').textContent=active?active.number:nextNumber;
+ const all=Object.values(noteMeta).sort((a,b)=>b.number-a.number);
+ $('notes').innerHTML=all.map(n=>{const items=expenses.filter(e=>e.noteId===n.id);const d=new Date(n.key+'T12:00:00');return `<div class="note"><div class="notehead"><div><strong>Nota ${n.number} · ${n.year}</strong><div class="muted">Semana desde ${d.toLocaleDateString('es-ES')}</div></div><span class="tag">${n.closed?'Cerrada':'Abierta'}</span></div><div style="margin-top:8px;font-weight:750">${money(items.reduce((s,e)=>s+Number(e.amount),0))}</div>${items.map(e=>`<div class="muted">${esc(e.date)} · ${esc(e.category)} · ${money(e.amount)} · ${esc(e.merchant)}</div>`).join('')}</div>`}).join('')||'<p class="muted">Todavía no hay notas.</p>';
+ $('noteControl').textContent=active?`La nota ${active.number} sigue abierta. Añade todos los tickets que necesites y ciérrala manualmente cuando termines.`:'No hay ninguna nota abierta. Al guardar el siguiente gasto se abrirá la nota '+nextNumber+'.';
+ $('closeNote').disabled=!active;
 }
 
 $('date').value=new Date().toISOString().slice(0,10);
+$('removePhoto').disabled=true;
 
+async function compressDataUrl(dataUrl,maxSide=1500,quality=0.72){
+ if(!dataUrl||!dataUrl.startsWith('data:image/'))return dataUrl;
+ return new Promise(resolve=>{const im=new Image();im.onload=()=>{const scale=Math.min(1,maxSide/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*scale));c.height=Math.max(1,Math.round(im.height*scale));c.getContext('2d').drawImage(im,0,0,c.width,c.height);resolve(c.toDataURL('image/jpeg',quality));};im.onerror=()=>resolve(dataUrl);im.src=dataUrl;});
+}
 // Registro de gastos: conserva el diseño original y guarda cada justificante.
 $('expenseForm').addEventListener('submit', async (event)=>{
  event.preventDefault();
@@ -119,11 +130,18 @@ $('expenseForm').addEventListener('submit', async (event)=>{
   try{ image=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(file)}); }
   catch(_){ $('ocrStatus').textContent='No se pudo guardar la fotografía. Inténtalo de nuevo.'; return; }
  }
+ const merchant=$('merchant').value.trim();
+ const duplicate=expenses.find(e=>e.date===date&&Number(e.amount).toFixed(2)===Number(amount).toFixed(2)&&String(e.merchant||'').trim().toLowerCase()===merchant.toLowerCase());
+ if(duplicate){$('ocrStatus').textContent='Posible duplicado: ya existe un gasto con la misma fecha, importe y comercio. No se ha guardado.';return;}
+ image=await compressDataUrl(image);
+ const current=activeNote();
+ if(current&&current.closed){$('ocrStatus').textContent='La nota anterior está cerrada. No se puede añadir aquí.';return;}
+ const note=ensureActiveNote(date);
  const expense={
-  id:(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random()),
+  id:(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random()),noteId:note.id,
   date, amount:Number(amount.toFixed(2)), category:$('category').value,
   paid:$('paid').value, cost:$('cost').value, description:$('description').value.trim(),
-  merchant:$('merchant').value.trim(), image
+  merchant, image
  };
  try{
   expenses.push(expense);
@@ -351,7 +369,11 @@ async function readTicket(){
  }finally{$('readTicket').disabled=false}
 }
 $('readTicket').addEventListener('click',readTicket);
+$('removePhoto').onclick=()=>{$('photo').value='';window.currentReceiptImage='';$('cropWrap').style.display='none';$('ocrStatus').textContent='Fotografía quitada. Los campos se han conservado.';$('removePhoto').disabled=true;};
+$('closeNote').onclick=()=>{const n=activeNote();if(!n)return;if(!confirm(`¿Cerrar definitivamente la nota ${n.number}? Después no podrás añadir más gastos a esta nota.`))return;n.closed=true;nextNumber=n.year>=2027?n.number+1:Math.max(nextNumber,n.number+1);save();$('ocrStatus').textContent=`Nota ${n.number} cerrada. La siguiente será la ${nextNumber}.`;};
+['photoLibrary','photoCamera','photoFiles'].forEach(id=>$(id).addEventListener('change',()=>{const f=$(id).files[0];if(!f)return;const dt=new DataTransfer();dt.items.add(f);$('photo').files=dt.files; $('photo').dispatchEvent(new Event('change'));}));
 $('photo').addEventListener('change',()=>{
+ $('removePhoto').disabled=!$('photo').files[0]&&!window.currentReceiptImage;
  $('cropWrap').style.display='none';window.currentReceiptImage='';
  if($('photo').files[0]){ $('ocrStatus').textContent='Foto seleccionada. Iniciando lectura automática…'; readTicket(); }
  else $('ocrStatus').textContent='';
@@ -367,6 +389,10 @@ $('exportPdf').onclick=()=>{
  $('printRows').innerHTML=expenses.map(e=>`<article style="border-bottom:1px solid #bbb;padding:12px 0;page-break-inside:avoid"><b>${esc(e.date)} · ${esc(e.category)} · ${money(e.amount)}</b><p>${esc(e.merchant)} ${esc(e.description)} · Pago: ${esc(e.paid)}</p>${(e.paid==='R'||e.category==='Solred')?'<i>Justificante Solred: no se adjunta</i>':(e.image?`<img src="${e.image}" style="max-width:100%;max-height:520px;object-fit:contain">`:'<i>Sin imagen adjunta</i>')}</article>`).join('');
  window.print();
 };
+$('exportJson').onclick=()=>{const payload={version:2,expenses,noteMeta,nextNumber};download('copia_gastos_trabajo.json',JSON.stringify(payload,null,2),'application/json');};
+$('importJson').onclick=()=>$('backupFile').click();
+$('backupFile').onchange=async()=>{const f=$('backupFile').files[0];if(!f)return;try{const d=JSON.parse(await f.text());if(!Array.isArray(d.expenses)||!d.noteMeta)throw new Error('Formato no válido');if(!confirm('La restauración reemplazará los datos locales actuales. ¿Has exportado una copia de seguridad?'))return;expenses=d.expenses;noteMeta=d.noteMeta;nextNumber=Number(d.nextNumber||22);save();alert('Copia restaurada.');}catch(e){alert('No se pudo restaurar: '+e.message)}};
+$('expenseForm').addEventListener('reset',()=>{setTimeout(()=>{$('photo').value='';window.currentReceiptImage='';$('cropWrap').style.display='none';$('ocrStatus').textContent='Campos limpiados.';$('removePhoto').disabled=true;},0)});
 render();
 </script>
 </body></html>

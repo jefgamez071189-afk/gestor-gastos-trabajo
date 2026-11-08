@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#102a43">
+<title>Gastos de trabajo</title>
+<style>
+:root{--navy:#102a43;--blue:#176b87;--bg:#f3f6f8;--card:#fff;--muted:#667788;--line:#dce4ea;--green:#18794e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172b3a}
+header{background:var(--navy);color:white;padding:22px 18px 26px;border-radius:0 0 22px 22px}
+header small{opacity:.8}h1{font-size:24px;margin:7px 0}header p{margin:0;opacity:.85;font-size:14px}
+main{max-width:760px;margin:auto;padding:16px}
+.summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:-4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:12px;box-shadow:0 2px 8px #102a430a}
+.metric{font-size:25px;font-weight:750;margin-top:5px}.muted{color:var(--muted);font-size:13px}
+h2{font-size:18px;margin:2px 0 12px}
+button,.button{border:0;border-radius:12px;padding:13px 15px;background:var(--blue);color:white;font-weight:650;font-size:15px;cursor:pointer;display:inline-block;text-align:center}
+button.secondary,.button.secondary{background:#e8f0f4;color:var(--navy)}button.danger{background:#fff0ef;color:#a42d24}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{flex:1}
+label{display:block;font-size:13px;font-weight:650;margin:11px 0 5px}
+input,select,textarea{width:100%;padding:12px;border:1px solid #cbd6de;border-radius:10px;background:white;font:inherit;color:#172b3a}
+input[type=file]{padding:9px;font-size:13px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.entry{display:flex;gap:12px;align-items:center}.thumb{width:54px;height:54px;object-fit:cover;border-radius:9px;background:#edf2f5}
+.entry strong{display:block}.entry .amount{margin-left:auto;font-weight:750;white-space:nowrap}
+.tag{display:inline-block;background:#e8f3ee;color:var(--green);border-radius:30px;padding:4px 8px;font-size:11px;font-weight:700}
+.note{border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0}
+.notehead{display:flex;justify-content:space-between;gap:10px;align-items:center}
+hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+footer{font-size:12px;color:var(--muted);padding:10px 2px 30px;line-height:1.5}
+#preview{display:none}
+@media(max-width:460px){.grid{grid-template-columns:1fr}.actions button{flex-basis:100%}}
+@media print{body{background:white}header,.no-print,footer{display:none!important}#preview{display:block!important}main{padding:0}.card{box-shadow:none;border:0}}
+</style>
+<script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+<header><small>GESTIÓN PERSONAL · PROTOTIPO 0.3</small><h1>Mis gastos de trabajo</h1><p>Registra cada justificante cuando se produzca el gasto.</p></header>
+<main>
+<section class="summary">
+ <div class="card"><div class="muted">Gastos registrados</div><div class="metric" id="total">0,00 €</div></div>
+ <div class="card"><div class="muted">Siguiente nota · 2026</div><div class="metric" id="next">22</div></div>
+</section>
+<section class="card no-print">
+ <h2>＋ Añadir gasto</h2>
+ <form id="expenseForm">
+  <label>Foto del ticket o factura</label>
+  <input id="photo" type="file" accept="image/*" capture="environment">
+  <button type="button" id="readTicket" class="secondary" style="width:100%;margin-top:8px">Leer ticket y rellenar datos</button>
+  <div class="muted">Al seleccionar la foto, intentaremos leerla automáticamente. Revisa siempre los datos detectados antes de guardar.</div>
+  <div id="ocrStatus" class="muted" role="status" style="margin-top:8px"></div>
+  <details id="ocrDebug" style="display:none;margin-top:8px"><summary class="muted">Ver texto reconocido (diagnóstico)</summary><pre id="ocrRaw" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#f3f6f8;padding:10px;border-radius:8px"></pre></details>
+  <div id="cropWrap" style="display:none;margin-top:10px"><div class="muted">Ticket detectado y recortado (sin el fondo)</div><canvas id="cropCanvas" style="width:100%;max-height:420px;object-fit:contain;border:1px solid #dce4ea;border-radius:10px;margin-top:6px"></canvas></div>
+  <div class="grid">
+   <div><label>Fecha</label><input id="date" type="date" required></div>
+   <div><label>Importe total (€)</label><input id="amount" type="number" min="0" step="0.01" placeholder="0,00" required></div>
+  </div>
+  <div class="grid">
+   <div><label>Tipo de gasto</label><select id="category"><option>Comida</option><option>Desayuno</option><option>Cena</option><option>Hotel</option><option>Transporte</option><option>Parking</option><option>Autopista</option><option>Otros</option><option>Solred</option></select></div>
+   <div><label>Pagado por</label><select id="paid"><option value="Cash">Efectivo</option><option value="V">Visa empleado</option><option value="R">Solred</option></select></div>
+  </div>
+  <div class="grid">
+   <div><label>Centro de coste</label><select id="cost"><option value="">Sin indicar</option><option>FA</option><option>PA</option><option>EM</option><option>EA</option><option>VMT</option><option>ADMIN</option></select></div>
+   <div><label>Descripción / motivo</label><input id="description" placeholder="Cliente, visita, formación…"></div>
+  </div>
+  <label>Comercio (opcional)</label><input id="merchant" placeholder="Nombre del establecimiento">
+  <div class="actions" style="margin-top:14px"><button type="submit">Guardar gasto</button><button type="reset" class="secondary">Limpiar</button></div>
+ </form>
+</section>
+<section class="card no-print">
+ <h2>Notas de gastos</h2><div class="muted">Se crea una nota cuando registres al menos un gasto en una semana. La numeración continúa desde el 22 en 2026 y vuelve a 1 en 2027.</div>
+ <div id="notes"></div>
+ <div class="actions"><button id="exportCsv" class="secondary">Exportar gastos (CSV)</button><button id="exportPdf">Preparar PDF</button></div>
+</section>
+<section id="preview">
+ <h1>Justificantes de gastos</h1><p id="printInfo"></p><div id="printRows"></div>
+</section>
+<footer class="no-print">
+<strong>Importante — prototipo inicial:</strong> los datos y fotos se guardan localmente en este navegador/dispositivo. No borres los datos del navegador ni cambies de dispositivo sin exportar una copia. Los datos se guardan en este navegador/dispositivo. Exporta copias de seguridad periódicamente. La integración con la plantilla oficial Nota de Gastos 2026.xlsx queda pendiente.
+</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const KEY='gastosTrabajoPrototype01';
+let expenses=[];try{expenses=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){}
+const money=n=>Number(n||0).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function save(){localStorage.setItem(KEY,JSON.stringify(expenses));render()}
+function weekKey(date){const d=new Date(date+'T12:00:00');const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function notes(){const groups={};expenses.forEach(e=>{const k=weekKey(e.date);(groups[k]??=[]).push(e)});return Object.keys(groups).sort().map(k=>({key:k,items:groups[k]}))}
+function render(){
+ $('total').textContent=money(expenses.reduce((s,e)=>s+Number(e.amount),0));
+ const y=new Date().getFullYear();const used=notes().filter(n=>n.key.startsWith(y+'-')).length;
+ $('next').textContent=y===2026?22+used:(y===2027?1+used:1+used);
+ $('notes').innerHTML=notes().sort((a,b)=>b.key.localeCompare(a.key)).map(n=>{
+  const d=new Date(n.key+'T12:00:00');const year=d.getFullYear();
+  const index=notes().filter(x=>x.key.startsWith(year+'-')).findIndex(x=>x.key===n.key);
+  const num=(year===2026?22:1)+index;
+  return `<div class="note"><div class="notehead"><div><strong>Nota ${num} · ${year}</strong><div class="muted">Semana desde ${d.toLocaleDateString('es-ES')}</div></div><span class="tag">${n.items.length} gasto(s)</span></div><div style="margin-top:8px;font-weight:750">${money(n.items.reduce((s,e)=>s+Number(e.amount),0))}</div>${n.items.map(e=>`<div class="muted">${esc(e.date)} · ${esc(e.category)} · ${money(e.amount)} · ${esc(e.merchant)}</div>`).join('')}</div>`
+ }).join('')||'<p class="muted">Todavía no hay gastos registrados.</p>';
+}
+
+$('date').value=new Date().toISOString().slice(0,10);
+
+// Registro de gastos: conserva el diseño original y guarda cada justificante.
+$('expenseForm').addEventListener('submit', async (event)=>{
+ event.preventDefault();
+ const date=$('date').value;
+ const amount=Number($('amount').value);
+ if(!date || !Number.isFinite(amount) || amount<=0){
+  $('ocrStatus').textContent='Indica una fecha y un importe válido antes de guardar.';
+  return;
+ }
+ let image=window.currentReceiptImage||'';
+ const file=$('photo').files[0];
+ if(file && !image){
+  try{ image=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(file)}); }
+  catch(_){ $('ocrStatus').textContent='No se pudo guardar la fotografía. Inténtalo de nuevo.'; return; }
+ }
+ const expense={
+  id:(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random()),
+  date, amount:Number(amount.toFixed(2)), category:$('category').value,
+  paid:$('paid').value, cost:$('cost').value, description:$('description').value.trim(),
+  merchant:$('merchant').value.trim(), image
+ };
+ try{
+  expenses.push(expense);
+  save();
+  $('expenseForm').reset();
+  $('date').value=new Date().toISOString().slice(0,10);
+  $('cropWrap').style.display='none';window.currentReceiptImage='';
+  $('ocrStatus').textContent='Gasto guardado correctamente.';
+ }catch(err){
+  expenses=expenses.filter(e=>e.id!==expense.id);
+  $('ocrStatus').textContent='No se pudo guardar. Puede que el almacenamiento del navegador esté lleno; exporta una copia y prueba con una foto más pequeña.';
+ }
+});
+
+function orderCorners(pts){
+ const sum=pts.map(p=>p.x+p.y), diff=pts.map(p=>p.y-p.x);
+ return [pts[sum.indexOf(Math.min(...sum))],pts[diff.indexOf(Math.min(...diff))],
+         pts[sum.indexOf(Math.max(...sum))],pts[diff.indexOf(Math.max(...diff))]];
+}
+function cropReceipt(file){
+ return new Promise((resolve)=>{
+  const img=new Image();img.onload=()=>{
+   const src=document.createElement('canvas');src.width=img.naturalWidth;src.height=img.naturalHeight;
+   src.getContext('2d').drawImage(img,0,0);
+   if(!window.cv||!cv.Mat){resolve(src);return}
+   let mat,gray,edges,contours,hierarchy;
+   try{
+    mat=cv.imread(src);gray=new cv.Mat();edges=new cv.Mat();contours=new cv.MatVector();hierarchy=new cv.Mat();
+    cv.cvtColor(mat,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,gray,new cv.Size(5,5),0);
+    cv.Canny(gray,edges,25,90);cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+    let best=null,bestArea=0;
+    for(let i=0;i<contours.size();i++){
+     const c=contours.get(i),peri=cv.arcLength(c,true),approx=new cv.Mat();
+     cv.approxPolyDP(c,approx,0.02*peri,true);
+     const area=cv.contourArea(approx);
+     if(approx.rows===4&&area>src.width*src.height*0.08&&area>bestArea){bestArea=area;best=approx.clone()}
+     approx.delete();c.delete();
+    }
+    if(best){
+     const pts=[];for(let i=0;i<4;i++)pts.push({x:best.intAt(i,0),y:best.intAt(i,1)});
+     const q=orderCorners(pts),dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+     const w=Math.round(Math.max(dist(q[0],q[1]),dist(q[3],q[2])));
+     const h=Math.round(Math.max(dist(q[0],q[3]),dist(q[1],q[2])));
+     const srcPts=cv.matFromArray(4,1,cv.CV_32FC2,[q[0].x,q[0].y,q[1].x,q[1].y,q[2].x,q[2].y,q[3].x,q[3].y]);
+     const dstPts=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,w-1,0,w-1,h-1,0,h-1]);
+     const M=cv.getPerspectiveTransform(srcPts,dstPts),warped=new cv.Mat();
+     cv.warpPerspective(mat,warped,M,new cv.Size(w,h),cv.INTER_CUBIC,cv.BORDER_REPLICATE);
+     const out=document.createElement('canvas');out.width=w;out.height=h;cv.imshow(out,warped);
+     best.delete();srcPts.delete();dstPts.delete();M.delete();warped.delete();
+     mat.delete();gray.delete();edges.delete();contours.delete();hierarchy.delete();resolve(out);return;
+    }
+    mat.delete();gray.delete();edges.delete();contours.delete();hierarchy.delete();resolve(src);
+   }catch(e){try{mat?.delete();gray?.delete();edges?.delete();contours?.delete();hierarchy?.delete()}catch(_){}resolve(src)}
+  };img.onerror=()=>resolve(null);img.src=URL.createObjectURL(file);
+ });
+}
+function normalizeMoneyToken(token){
+ let t=String(token||'').replace(/[^\d,.-]/g,'');
+ if(!t)return null;
+ // Spanish tickets: 1.234,56; English-style tickets: 1,234.56; and 12,50.
+ if(t.includes(',')&&t.includes('.')){
+  if(t.lastIndexOf(',')>t.lastIndexOf('.'))t=t.replace(/\./g,'').replace(',','.');
+  else t=t.replace(/,/g,'');
+ }else if(t.includes(',')){
+  const a=t.split(',');t=a.length===2&&a[1].length<=2?a[0].replace(/\./g,'')+'.'+a[1]:t.replace(/,/g,'');
+ }else if(t.includes('.')){
+  const a=t.split('.');t=a.length===2&&a[1].length===2?a[0]+'.'+a[1]:t.replace(/\./g,'');
+ }
+ const n=Number(t);return Number.isFinite(n)&&n>0&&n<100000?n:null;
+}
+function parseOCR(text){
+ const lines=text.split(/\r?\n/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);
+ let dateFound=false;
+ for(const line of lines){
+  let m=line.match(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2}|\d{2})\b/);
+  if(m){let y=m[3].length===2?'20'+m[3]:m[3];let d=Number(m[1]),mo=Number(m[2]);if(d>=1&&d<=31&&mo>=1&&mo<=12){$('date').value=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;dateFound=true;break}}
+  m=line.match(/\b(20\d{2})[\/.-](\d{1,2})[\/.-](\d{1,2})\b/);
+  if(m){$('date').value=`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;dateFound=true;break}
+ }
+ const candidates=[];
+ for(const line of lines){
+  // Capture monetary-looking values, allowing thousands separators and OCR spacing.
+  const re=/(?<!\d)(\d{1,3}(?:[.\s]\d{3})+(?:[,.]\d{2})|\d{1,6}[,.]\d{1,2}|\d{1,6})(?!\d)/g;let m;
+  while((m=re.exec(line))!==null){
+   const n=normalizeMoneyToken(m[1]);if(n===null)continue;
+   const low=line.toLowerCase();
+   if(/\b(20\d{2})\b/.test(m[1])||/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/.test(line))continue;
+   let score=0;
+   if(/total\s*(a\s*pagar|pagar|factura|€|eur)|importe\s*total|total\s*incluido|total\s*con\s*iva/i.test(low))score+=12;
+   else if(/\btotal\b/i.test(low))score+=8;
+   if(/subtotal|base\s*imponible|\biva\b|impuesto|propina|cambio|entregado|ahorro|descuento/i.test(low))score-=10;
+   if(/[€]|eur/i.test(line))score+=2;
+   if(/[,.]\d{2}\b/.test(m[1]))score+=1;
+   candidates.push({n,line,score});
+  }
+ }
+ candidates.sort((a,b)=>b.score-a.score);
+ let chosen=candidates.find(x=>x.score>=8);
+ if(!chosen&&candidates.length)chosen=candidates.sort((a,b)=>b.n-a.n)[0];
+ if(chosen)$('amount').value=chosen.n.toFixed(2);
+ const merchant=lines.find(x=>/bar\s+restaurante|restaurante|cafeter[ií]a|hotel|gasolinera/i.test(x));
+ if(merchant)$('merchant').value=merchant.replace(/\s+/g,' ').trim();
+ else {
+  const candidate=lines.find(x=>x.length>4&&x.length<55&&/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(x)&&!/(\d{2}[\/.-]\d{2}|factura|ticket|total|iva|cif|nif|gracias|cambio|efectivo|tel[eé]fono|www\.)/i.test(x));
+  if(candidate)$('merchant').value=candidate;
+ }
+ if(/men[uú]\s+del\s+d[ií]a|restaurante|bar\s+restaurante/i.test(text))$('category').value='Comida';
+ if(/\btarjeta\b|visa|mastercard/i.test(text))$('paid').value='V';
+ return {date:dateFound,amount:!!chosen,merchant:!!$('merchant').value, candidates};
+}
+function enhanceForOCR(source){
+ const c=document.createElement('canvas');
+ const scale=Math.min(2.2,Math.max(1,1800/Math.max(source.width,source.height)));
+ c.width=Math.round(source.width*scale);c.height=Math.round(source.height*scale);
+ const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0,c.width,c.height);
+ const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ for(let i=0;i<d.length;i+=4){
+  const gray=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+  const contrast=Math.max(0,Math.min(255,(gray-128)*1.35+128));
+  d[i]=d[i+1]=d[i+2]=contrast;
+ }
+ ctx.putImageData(im,0,0);return c;
+}
+async function ensureTesseract(){
+ if(window.Tesseract)return window.Tesseract;
+ return await new Promise((resolve,reject)=>{
+  const script=document.createElement('script');
+  script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+  script.onload=()=>window.Tesseract?resolve(window.Tesseract):reject(new Error('OCR no disponible'));
+  script.onerror=()=>reject(new Error('No se pudo descargar el motor OCR'));
+  document.head.appendChild(script);
+ });
+}
+async function readTicket(){
+ const f=$('photo').files[0],status=$('ocrStatus');
+ if(!f){status.textContent='Primero selecciona o fotografía un ticket.';return}
+ $('readTicket').disabled=true;$('ocrDebug').style.display='none';$('ocrRaw').textContent='';
+ window.currentReceiptImage='';
+ try{
+  status.textContent='Preparando el lector de tickets…';
+  const OCR=await ensureTesseract();
+  status.textContent='Detectando y recortando el ticket…';
+  const crop=await cropReceipt(f);
+  if(!crop)throw new Error('No se pudo abrir la imagen');
+  $('cropWrap').style.display='block';
+  const display=$('cropCanvas');display.width=crop.width;display.height=crop.height;display.getContext('2d').drawImage(crop,0,0);
+  window.currentReceiptImage=crop.toDataURL('image/jpeg',0.88);
+  const enhanced=enhanceForOCR(crop);
+  status.textContent='Leyendo el ticket…';
+  let result;
+  try{
+   result=await OCR.recognize(enhanced,'spa',{logger:m=>{if(m.status==='recognizing text')status.textContent=`Leyendo el ticket… ${Math.round((m.progress||0)*100)}%`;}});
+  }catch(firstError){
+   status.textContent='Reintentando lectura…';
+   result=await OCR.recognize(crop,'eng',{logger:m=>{if(m.status==='recognizing text')status.textContent=`Reintentando lectura… ${Math.round((m.progress||0)*100)}%`;}});
+  }
+  const raw=result.data.text||'';$('ocrRaw').textContent=raw;$('ocrDebug').style.display='block';
+  const detected=parseOCR(raw);
+  const count=[detected.date,detected.amount,detected.merchant].filter(Boolean).length;
+  status.textContent=count
+   ?`Lectura terminada: ${count}/3 datos detectados. Revisa los campos antes de guardar.`
+   :'He podido abrir la foto, pero no reconocer los datos. Mira «Ver texto reconocido» para comprobar qué ha leído el motor.';
+ }catch(err){
+  status.textContent='No se pudo iniciar la lectura: '+(err.message||'error desconocido')+'. Comprueba la conexión a Internet e inténtalo de nuevo.';
+ }finally{$('readTicket').disabled=false}
+}
+$('readTicket').addEventListener('click',readTicket);
+$('photo').addEventListener('change',()=>{
+ $('cropWrap').style.display='none';window.currentReceiptImage='';
+ if($('photo').files[0]){ $('ocrStatus').textContent='Foto seleccionada. Iniciando lectura automática…'; readTicket(); }
+ else $('ocrStatus').textContent='';
+});
+function download(name,content,type){const a=document.createElement('a');const u=URL.createObjectURL(new Blob([content],{type}));a.href=u;a.download=name;a.click();URL.revokeObjectURL(u)}
+$('exportCsv').onclick=()=>{
+ const rows=[['Fecha','Importe EUR','Tipo','Pagado por','Centro de coste','Descripción','Comercio'],...expenses.map(e=>[e.date,e.amount,e.category,e.paid,e.cost,e.description,e.merchant])];
+ const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join('\r\n');
+ download('gastos_trabajo.csv',csv,'text/csv;charset=utf-8');
+};
+$('exportPdf').onclick=()=>{
+ $('printInfo').textContent='Generado el '+new Date().toLocaleDateString('es-ES')+' · '+expenses.length+' justificantes';
+ $('printRows').innerHTML=expenses.map(e=>`<article style="border-bottom:1px solid #bbb;padding:12px 0;page-break-inside:avoid"><b>${esc(e.date)} · ${esc(e.category)} · ${money(e.amount)}</b><p>${esc(e.merchant)} ${esc(e.description)} · Pago: ${esc(e.paid)}</p>${(e.paid==='R'||e.category==='Solred')?'<i>Justificante Solred: no se adjunta</i>':(e.image?`<img src="${e.image}" style="max-width:100%;max-height:520px;object-fit:contain">`:'<i>Sin imagen adjunta</i>')}</article>`).join('');
+ window.print();
+};
+render();
+</script>
+</body></html>

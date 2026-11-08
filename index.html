@@ -36,7 +36,7 @@ footer{font-size:12px;color:var(--muted);padding:10px 2px 30px;line-height:1.5}
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
-<header><small>GESTIÓN PERSONAL · PROTOTIPO 0.5</small><h1>Mis gastos de trabajo</h1><p>Registra cada justificante cuando se produzca el gasto.</p></header>
+<header><small>GESTIÓN PERSONAL · PROTOTIPO 0.6</small><h1>Mis gastos de trabajo</h1><p>Registra cada justificante cuando se produzca el gasto.</p></header>
 <main>
 <section class="summary">
  <div class="card"><div class="muted">Gastos registrados</div><div class="metric" id="total">0,00 €</div></div>
@@ -59,7 +59,7 @@ footer{font-size:12px;color:var(--muted);padding:10px 2px 30px;line-height:1.5}
   </div>
   <div class="grid">
    <div><label>Tipo de gasto</label><select id="category"><option>Comida</option><option>Desayuno</option><option>Cena</option><option>Hotel</option><option>Transporte</option><option>Parking</option><option>Autopista</option><option>Otros</option><option>Solred</option></select></div>
-   <div><label>Pagado por</label><select id="paid"><option value="Cash">Efectivo</option><option value="V">Visa empleado</option><option value="R">Solred</option></select></div>
+   <div><label>Pagado por</label><select id="paid" required><option value="" selected disabled>Seleccionar método de pago</option><option value="Cash">Efectivo</option><option value="V">Visa empleado</option><option value="R">Solred</option></select></div>
   </div>
   <div class="grid">
    <div><label>Centro de coste</label><select id="cost"><option value="">Sin indicar</option><option>FA</option><option>PA</option><option>EM</option><option>EA</option><option>VMT</option><option>ADMIN</option></select></div>
@@ -256,7 +256,12 @@ function parseOCR(text){
  }
  if(merchant)$('merchant').value=merchant;
  if(/men[uú]\s+del\s+d[ií]a|restaurante|bar\s+restaurante/i.test(text))$('category').value='Comida';
- if(/\btarjeta\b|visa|mastercard/i.test(text))$('paid').value='V';
+ // Normalizar el OCR para tolerar espacios y signos insertados dentro de 'Tarjeta'.
+ const payText=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const payCompact=payText.replace(/[^a-z]/g,'');
+ if(/solred/.test(payCompact))$('paid').value='R';
+ else if(/tarjeta|visa|mastercard|creditcard|debitcard/.test(payCompact)||/tarj.{0,5}eta/i.test(payText))$('paid').value='V';
+ else if(/efectivo|contado|cash|metalico/.test(payCompact))$('paid').value='Cash';
  return {date:dateFound,amount:!!chosen,merchant:!!merchant,candidates:amounts};
 }
 function enhanceForOCR(source){
